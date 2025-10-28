@@ -1,65 +1,118 @@
 name: Build and Deploy
-
+ 
 on:
-  push:
-    branches:
-      - main
 
+  push:
+
+    branches:
+
+      - master
+ 
 jobs:
+
   build:
-    name: Build and Scan
+
+    name: Build
+
     runs-on: [self-hosted]
 
     steps:
+
       - name: Checkout code
+
         uses: actions/checkout@v2
-        with:
-          fetch-depth: 0  # Required for full SonarQube analysis
 
+        with:
+
+          fetch-depth: 0
+ 
       - name: SonarQube Scan
-        uses: sonarsource/sonarqube-scan-action@master
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-        with:
-          args: >
-            -Dsonar.projectKey=Swiggy
-            -Dsonar.projectName=Swiggy
-            -Dsonar.sources=.
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-      - name: Docker build and push to ECR Public
+        uses: sonarsource/sonarqube-scan-action@master
+
         env:
-          DOCKER_CLI_ACI: 1
+
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+        with:
+
+          args: >
+
+            -Dsonar.projectKey=swiggy
+
+            -Dsonar.projectName=swiggy
+
+            -Dsonar.sources=.
+ 
+      - name: NPM Install
+
+        run: npm install
+ 
+      - name: Docker build and push to ECR
+
         run: |
-          # Authenticate Docker to ECR Public
+
           aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/f6x5f0l3
 
-          # Build Docker image
-          docker build -t docker-ecr -f deployment-using-github-actions/Dockerfile deployment-using-github-actions/
+          docker build -t docker-ecr .
 
-          # Tag the image for ECR Public
           docker tag docker-ecr:latest public.ecr.aws/f6x5f0l3/docker-ecr:latest
 
-          # Push the image to ECR Public
           docker push public.ecr.aws/f6x5f0l3/docker-ecr:latest
 
+        env:
+
+          DOCKER_CLI_ACI: 1
+ 
   deploy:
-    name: Deploy Container
+
+    name: Deploy
+
     needs: build
+
     runs-on: [self-hosted]
 
     steps:
+
       - name: Docker pull image
+
         run: docker pull public.ecr.aws/f6x5f0l3/docker-ecr:latest
-
+ 
       - name: Image scan with Trivy
-        run: trivy image public.ecr.aws/f6x5f0l3/docker-ecr:latest > trivyimagedeploy.txt
 
-      - name: Deploy to container
+        run: trivy image public.ecr.aws/f6x5f0l3/docker-ecr:latest > trivyimagedeploy.txt
+ 
+      - name: Stop and remove existing container
+
+        run: |
+
+          docker stop swiggy-clone || true
+
+          docker rm swiggy-clone || true
+ 
+      - name: Run new container
+
         run: docker run -d --name swiggy-clone -p 3000:3000 public.ecr.aws/f6x5f0l3/docker-ecr:latest
+ 
+      - name: Configure AWS credentials
+
+        uses: aws-actions/configure-aws-credentials@v2
+
+        with:
+
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+          aws-region: us-east-1
+ 
+      - name: Update kubeconfig for EKS
+
+        run: aws eks update-kubeconfig --region us-east-1 --name EKS_CLOUD
+ 
+      - name: Deploy to Kubernetes
+
+        run: kubectl apply -f deployment-service.yml
+ 
