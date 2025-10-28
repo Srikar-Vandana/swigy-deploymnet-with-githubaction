@@ -5,21 +5,40 @@ on:
     branches:
       - main
 
-
 jobs:
   build:
-    name: Build
+    name: Build and Scan
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout code
+        uses: actions/checkout@v2
         with:
-          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
-      - uses: sonarsource/sonarqube-scan-action@master
+          fetch-depth: 0  # Required for full SonarQube analysis
+
+      - name: SonarQube Scan
+        uses: sonarsource/sonarqube-scan-action@master
         env:
-           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         with:
           args: >
             -Dsonar.projectKey=Swiggy
             -Dsonar.projectName=Swiggy
             -Dsonar.sources=.
+
+      - name: Docker build and push to ECR
+        env:
+          DOCKER_CLI_ACI: 1
+        run: |
+          # Authenticate Docker to ECR
+          aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/f6x5f0l3
+
+          # Build Docker image
+          docker build -t docker-ecr -f deployment-using-github-actions/Dockerfile deployment-using-github-actions/
+
+          # Tag the image for ECR
+          docker tag docker-ecr:latest public.ecr.aws/f6x5f0l3/docker-ecr:latest
+
+          # Push the image to ECR
+          docker push public.ecr.aws/f6x5f0l3/docker-ecr:latest
