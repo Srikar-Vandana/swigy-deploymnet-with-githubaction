@@ -27,18 +27,25 @@ jobs:
             -Dsonar.projectName=Swiggy
             -Dsonar.sources=.
 
-      - name: Docker build and push to ECR
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Docker build and push to ECR Public
         env:
           DOCKER_CLI_ACI: 1
         run: |
-          # Authenticate Docker to ECR
+          # Authenticate Docker to ECR Public
           aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/f6x5f0l3
 
           # Build Docker image
           docker build -t docker-ecr -f deployment-using-github-actions/Dockerfile deployment-using-github-actions/
 
-          # Tag the image for ECR
+          # Tag the image for ECR Public
           docker tag docker-ecr:latest public.ecr.aws/f6x5f0l3/docker-ecr:latest
 
-          # Push the image to ECR
+          # Push the image to ECR Public
           docker push public.ecr.aws/f6x5f0l3/docker-ecr:latest
