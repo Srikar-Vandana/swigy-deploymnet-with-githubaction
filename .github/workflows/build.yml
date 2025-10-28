@@ -1,4 +1,4 @@
-name: Build
+name: Build and Deploy
 
 on:
   push:
@@ -33,7 +33,6 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
-
       - name: Docker build and push to ECR Public
         env:
           DOCKER_CLI_ACI: 1
@@ -49,3 +48,18 @@ jobs:
 
           # Push the image to ECR Public
           docker push public.ecr.aws/f6x5f0l3/docker-ecr:latest
+
+  deploy:
+    name: Deploy Container
+    needs: build
+    runs-on: [self-hosted]
+
+    steps:
+      - name: Docker pull image
+        run: docker pull public.ecr.aws/f6x5f0l3/docker-ecr:latest
+
+      - name: Image scan with Trivy
+        run: trivy image public.ecr.aws/f6x5f0l3/docker-ecr:latest > trivyimagedeploy.txt
+
+      - name: Deploy to container
+        run: docker run -d --name swiggy-clone -p 3000:3000 public.ecr.aws/f6x5f0l3/docker-ecr:latest
