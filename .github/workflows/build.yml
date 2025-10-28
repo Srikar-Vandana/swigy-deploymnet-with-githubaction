@@ -1,118 +1,82 @@
 name: Build and Deploy
- 
+
 on:
-
   push:
-
     branches:
-
       - main
- 
+
 jobs:
-
   build:
-
     name: Build
-
-    runs-on: [self-hosted]
+    runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout code
-
         uses: actions/checkout@v2
-
         with:
-
           fetch-depth: 0
- 
+
       - name: SonarQube Scan
-
         uses: sonarsource/sonarqube-scan-action@master
-
         env:
-
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-
         with:
-
           args: >
-
-            -Dsonar.projectKey=swiggy
-
-            -Dsonar.projectName=swiggy
-
+            -Dsonar.projectKey=Swiggy
+            -Dsonar.projectName=Swiggy
             -Dsonar.sources=.
- 
-      - name: NPM Install
 
-        run: npm install
- 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
       - name: Docker build and push to ECR
-
+        env:
+          DOCKER_CLI_ACI: 1
         run: |
-
           aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/f6x5f0l3
-
-          docker build -t docker-ecr .
-
+          docker build -t docker-ecr -f deployment-using-github-actions/Dockerfile deployment-using-github-actions/
           docker tag docker-ecr:latest public.ecr.aws/f6x5f0l3/docker-ecr:latest
-
           docker push public.ecr.aws/f6x5f0l3/docker-ecr:latest
 
-        env:
-
-          DOCKER_CLI_ACI: 1
- 
   deploy:
-
     name: Deploy
-
     needs: build
-
-    runs-on: [self-hosted]
+    runs-on: self-hosted
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        run: |
+          export AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+          export AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          export AWS_REGION=us-east-1
+
+      - name: Authenticate Docker to ECR
+        run: |
+          aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/f6x5f0l3t
 
       - name: Docker pull image
-
         run: docker pull public.ecr.aws/f6x5f0l3/docker-ecr:latest
- 
-      - name: Image scan with Trivy
 
-        run: trivy image public.ecr.aws/f6x5f0l3/docker-ecr:latest > trivyimagedeploy.txt
- 
+      - name: Image scan
+        run: trivy image public.ecr.aws/f6x5f0l3/docker-ecr:latest/docker-ecr:latest > trivyimagedeploy.txt
+
       - name: Stop and remove existing container
-
         run: |
-
           docker stop swiggy-clone || true
-
           docker rm swiggy-clone || true
- 
-      - name: Run new container
 
+      - name: Deploy to local container
         run: docker run -d --name swiggy-clone -p 3000:3000 public.ecr.aws/f6x5f0l3/docker-ecr:latest
- 
-      - name: Configure AWS credentials
+      - name: Update kubeconfig
+        run: aws eks --region us-east-1 update-kubeconfig --name EKS_CLOUD
 
-        uses: aws-actions/configure-aws-credentials@v2
-
-        with:
-
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-
-          aws-region: us-east-1
- 
-      - name: Update kubeconfig for EKS
-
-        run: aws eks update-kubeconfig --region us-east-1 --name EKS_CLOUD
- 
       - name: Deploy to Kubernetes
-
-        run: kubectl apply -f deployment-service.yml
- 
+        run: kubectl apply -f deployment-using-github-actions/deployment-service.yml --validate=false
